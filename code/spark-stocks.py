@@ -21,10 +21,10 @@ stock_schema = StructType([
     StructField('Volume', IntegerType(), True)
 ])
 
-# Read in data as a stream from s3 (Must create bucket and insert data csv into the bucket)
-s3_path = "s3a://ece-4150-spark-project-stock-data-priest-2025/data/AAPL.csv"
-# Create apple stock data spark df
-apple_df = spark.read.format("csv").option("header", "true").schema(stock_schema).load(s3_path)
+# Read in data from data directory
+local_path = "./data/AAPL.csv" 
+# Create apple stock data Spark DataFrame
+apple_df = spark.read.format("csv").option("header", "true").schema(stock_schema).load(local_path)
 #apple_df.show(10) # show top 10 points
 
 # use the following command to install pandas - ON PYSPARK NOTEBOOK

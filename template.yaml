@@ -1,0 +1,155 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Lab5 Template"
+Parameters:
+  KeyName:
+      Description: Name of an existing EC2 KeyPair to enable SSH access to the EMR instances
+      Type: String
+
+  # VpcId:
+  #     Description: ID of the VPC where the EMR cluster will be created
+  #     Type: AWS::EC2::VPC::Id
+  #     Default: ""
+
+  # SubnetId:
+  #     Description: Subnet ID within the selected VPC
+  #     Type: AWS::EC2::Subnet::Id
+  #     Default: ""
+
+  # MyIP:
+  #     Description: Your local machine's Public IP 
+  #     Type: String
+
+
+Resources:
+  # Default VPC
+  DefaultVPC:
+      Type: "AWS::EC2::VPC"
+      Properties:
+        CidrBlock: "10.0.0.0/16"
+        EnableDnsSupport: true
+        EnableDnsHostnames: true
+
+  VPCInternetGateway:
+      Type: "AWS::EC2::InternetGateway"
+      Properties: {}
+    
+  AttachGatewayToVPC:
+      Type: "AWS::EC2::VPCGatewayAttachment"
+      Properties:
+        VpcId: !Ref DefaultVPC
+        InternetGatewayId: !Ref VPCInternetGateway
+
+# Route Table
+  RouteTable:
+      Type: "AWS::EC2::RouteTable"
+      Properties:
+        VpcId: !Ref DefaultVPC
+        Tags:
+          - Key: "Name"
+            Value: "PublicRouteTable-L5"
+
+  PublicRoute:
+      Type: "AWS::EC2::Route"
+      Properties:
+        RouteTableId: !Ref RouteTable
+        DestinationCidrBlock: "0.0.0.0/0"
+        GatewayId: !Ref VPCInternetGateway
+
+  # Default Subnets
+  DefaultSubnet:
+      Type: "AWS::EC2::Subnet"
+      Properties:
+        VpcId: !Ref DefaultVPC
+        CidrBlock: "10.0.1.0/24"
+        AvailabilityZone: !Sub "${AWS::Region}a"
+        MapPublicIpOnLaunch: true
+        Tags:
+          - Key: "Name"
+            Value: "PublicSubnet-L5"
+
+  SubnetRouteTableAssociation1:
+      Type: "AWS::EC2::SubnetRouteTableAssociation"
+      Properties:
+        SubnetId: !Ref DefaultSubnet
+        RouteTableId: !Ref RouteTable
+
+
+  EMRServiceRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: elasticmapreduce.amazonaws.com
+              Action: sts:AssumeRole
+        ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/service-role/AmazonElasticMapReduceRole
+
+  EMRInstanceProfile:
+      Type: AWS::IAM::InstanceProfile
+      Properties:
+        Roles:
+          - !Ref EMRServiceRole
+
+  # todo: if ip supplied, use that, else default to 0.0.0.0
+  EMRMasterSecurityGroup:
+      Type: "AWS::EC2::SecurityGroup"
+      Properties:
+        GroupDescription: "Allow SSH from anywhere for EMR Master"
+        VpcId: !Ref DefaultVPC
+        SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: 22
+            ToPort: 22
+            CidrIp: "0.0.0.0/0"  # Allow SSH from anywhere
+
+  EMRSlaveSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "Default security group for EMR Core/Task Nodes"
+      VpcId: !Ref DefaultVPC
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp: "0.0.0.0/0"
+
+  EMRCluster:
+      Type: AWS::EMR::Cluster
+      Properties:
+        Name: EMR-Cluster-Hadoop
+        ReleaseLabel: emr-7.6.0
+        Applications:
+          - Name: Hadoop
+          - Name: Hive
+          - Name: Hue
+          - Name: Pig
+          - Name: Tez
+        Instances:
+          Ec2SubnetId: !Ref DefaultSubnet
+          Ec2KeyName: !Ref KeyName
+          EmrManagedMasterSecurityGroup: !Ref EMRMasterSecurityGroup
+          EmrManagedSlaveSecurityGroup: !Ref EMRSlaveSecurityGroup
+          MasterInstanceGroup:
+            InstanceType: m5.xlarge
+            InstanceCount: 1
+            Market: ON_DEMAND
+          CoreInstanceGroup:
+            InstanceType: m5.xlarge
+            InstanceCount: 1
+            Market: ON_DEMAND
+        JobFlowRole: !Ref EMRInstanceProfile
+        ServiceRole: !Ref EMRServiceRole
+        VisibleToAllUsers: true
+        LogUri: !Sub s3://my-emr-logs-${AWS::Region}/
+
+  # AddMyIPToMasterSecurityGroup:
+  #     Type: AWS::EC2::SecurityGroupIngress
+  #     Properties:
+  #       GroupId: !GetAtt EMRCluster.MasterSecurityGroupId  # Get the master security group ID
+  #       IpProtocol: tcp
+  #       FromPort: 22
+  #       ToPort: 22
+  #       CidrIp: !Sub '${MyIP}/32'  # Allow SSH from your local machine's IP
